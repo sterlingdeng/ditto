@@ -1,0 +1,16 @@
+[package]
+name = "ts_core"
+version = "0.1.0"
+edition = "2021"
+description = "A Rust library for traffic shaping using pf and dummynet on macOS"
+authors = ["Your Name <your.email@example.com>"]
+license = "MIT"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+thiserror = "1.0"
+tempfile = "3.8"
+log = "0.4"
+clap = { version = "4.4", features = ["derive"] }
+env_logger = "0.10"
