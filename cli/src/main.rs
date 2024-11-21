@@ -1,9 +1,12 @@
 use clap::{Parser, Subcommand};
 use log::{error, info};
+use serde_json::from_str;
+use std::fs;
 use std::net::IpAddr;
 use std::process;
-use std::fs;
 
+use simulation::models::Manifest;
+use simulation::{Simulation, SimulationConfig, SimulationError};
 use ts_core::{Protocol, TrafficConfig, TrafficShaper};
 
 #[derive(Parser)]
@@ -44,6 +47,11 @@ enum Commands {
     },
     /// Stop traffic shaping and restore original configuration
     Stop,
+
+    Simulation {
+        #[arg(long)]
+        manifest_path: String,
+    },
 }
 
 fn validate_percentage(s: &str) -> Result<f32, String> {
@@ -69,9 +77,7 @@ fn parse_port_range(s: &str) -> Result<(u16, u16), String> {
         return Err("Port range must be in format: start-end".to_string());
     }
 
-    let start: u16 = parts[0]
-        .parse()
-        .map_err(|_| "Invalid start port number")?;
+    let start: u16 = parts[0].parse().map_err(|_| "Invalid start port number")?;
     let end: u16 = parts[1].parse().map_err(|_| "Invalid end port number")?;
 
     if start > end {
@@ -86,7 +92,8 @@ fn check_root_access() -> bool {
     fs::metadata("/etc/pf.conf").is_ok()
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     // Initialize logging
     env_logger::init();
 
@@ -109,7 +116,7 @@ fn main() {
             port_range,
         } => {
             info!("Starting traffic shaping...");
-            
+
             // Create traffic shaping configuration
             let config = match TrafficConfig::new(
                 packet_loss,
@@ -128,7 +135,7 @@ fn main() {
 
             // Apply traffic shaping
             let shaper = TrafficShaper::new(config);
-            if let Err(e) = shaper.apply() {
+            if let Err(e) = shaper.enable() {
                 error!("Failed to apply traffic shaping: {}", e);
                 process::exit(1);
             }
@@ -137,16 +144,9 @@ fn main() {
         }
         Commands::Stop => {
             info!("Stopping traffic shaping...");
-            
+
             // Create a dummy config just to use the cleanup functionality
-            let config = match TrafficConfig::new(
-                0.0,
-                0,
-                0,
-                Protocol::Both,
-                None,
-                None,
-            ) {
+            let config = match TrafficConfig::new(0.0, 0, 0, Protocol::Both, None, None) {
                 Ok(config) => config,
                 Err(e) => {
                     error!("Failed to create configuration: {}", e);
@@ -161,6 +161,18 @@ fn main() {
             }
 
             info!("Traffic shaping stopped successfully");
+        }
+        Commands::Simulation { manifest_path } => {
+            use std::fs;
+            use std::time::Instant;
+            let contents = fs::read_to_string(manifest_path).expect("failed to open manifest path");
+            let manifest: Manifest = from_str(contents.as_str()).unwrap();
+            let mut simulation = Simulation::new(manifest, Instant::now());
+
+            let join = tokio::spawn(async move { simulation.start().await });
+            if let Err(e) = join.await {
+                eprintln!("error after simulation: {}", e);
+            }
         }
     }
 }

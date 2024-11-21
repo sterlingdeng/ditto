@@ -1,0 +1,36 @@
+{
+    "config": {
+        "packet_loss": 0,
+        "latency": 50,
+        "bandwidth": 1000000,
+        "protocol": "udp",
+        "port_range": [8888, 8889]
+    },
+    "events": [
+        {
+            "time": "1s"
+            "packet_loss": 5,
+            "latency": 200,
+            "bandwidth": 1000000,
+        },
+        {
+            "time": "5s"
+            "packet_loss": 7,
+            "latency": 200,
+            "bandwidth": 1000000,
+        },
+        {
+            "time": "7s"
+            "packet_loss": 5,
+            "latency": 100,
+            "bandwidth": 1000000,
+        },
+        {
+            "time": "10s"
+            "packet_loss": 5,
+            "latency": 200,
+            "bandwidth": 1000000,
+        },
+    ],
+}
+

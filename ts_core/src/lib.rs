@@ -1,3 +1,4 @@
+use serde::Deserialize;
 use std::net::IpAddr;
 use thiserror::Error;
 
@@ -7,7 +8,7 @@ mod rules;
 use commands::{DnctlCommands, PfctlCommands};
 use rules::RuleGenerator;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 pub enum Protocol {
     Tcp,
     Udp,
@@ -34,6 +35,16 @@ pub struct TrafficConfig {
 pub struct PortRange {
     pub start: u16,
     pub end: u16,
+}
+
+#[derive(Debug, Clone)]
+pub struct ApplyConfig {
+    /// Packet loss percentage (0.0 to 100.0)
+    pub packet_loss: f32,
+    /// Latency in milliseconds
+    pub latency: u32,
+    /// Maximum bandwidth in bits per second
+    pub max_bandwidth: u64,
 }
 
 #[derive(Error, Debug)]
@@ -97,7 +108,7 @@ impl TrafficShaper {
     }
 
     /// Applies the traffic shaping rules
-    pub fn apply(&self) -> Result<(), TrafficShapingError> {
+    pub fn enable(&self) -> Result<(), TrafficShapingError> {
         // Step 1: Enable PF if not already enabled
         PfctlCommands::enable()?;
 
@@ -116,6 +127,16 @@ impl TrafficShaper {
             PfctlCommands::load_rules(&rules)?;
         }
 
+        Ok(())
+    }
+
+    pub fn apply(&self, config: ApplyConfig) -> Result<(), TrafficShapingError> {
+        DnctlCommands::configure_pipe(
+            DEFAULT_PIPE_NUMBER,
+            Some(config.max_bandwidth),
+            Some(config.latency),
+            Some(config.packet_loss / 100.0),
+        )?;
         Ok(())
     }
 

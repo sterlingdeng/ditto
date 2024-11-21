@@ -14,3 +14,5 @@ tempfile = "3.8"
 log = "0.4"
 clap = { version = "4.4", features = ["derive"] }
 env_logger = "0.10"
+serde = { version = "1.0.215", features = ["derive"] }
+serde_json = "1.0.132"
