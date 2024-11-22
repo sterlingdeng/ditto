@@ -1,21 +1,26 @@
-use std::process::Command;
-use tempfile::NamedTempFile;
 use std::io::Write;
+use std::process::Command;
+
+use tempfile::NamedTempFile;
+use tracing::info;
+
 use crate::TrafficShapingError;
 
 pub(crate) struct PfctlCommands;
 pub(crate) struct DnctlCommands;
 
+// pfctl - packet filter control
 impl PfctlCommands {
     /// Loads PF rules from a file
-    pub fn load_rules(rules: &str) -> Result<(), TrafficShapingError> {
+    pub fn load_rules(rules: &str, anchor_name: Option<&str>) -> Result<(), TrafficShapingError> {
         let mut temp_file = NamedTempFile::new()?;
         temp_file.write_all(rules.as_bytes())?;
-        
-        let output = Command::new("pfctl")
-            .arg("-f")
-            .arg(temp_file.path())
-            .output()?;
+
+        let mut pfctl = Command::new("pfctl");
+        if let Some(anchor_name) = anchor_name {
+            pfctl.arg("-a").arg(anchor_name);
+        }
+        let output = pfctl.arg("-f").arg(temp_file.path()).output()?;
 
         if !output.status.success() {
             return Err(TrafficShapingError::CommandError(
@@ -44,12 +49,15 @@ impl PfctlCommands {
 
     /// Enables PF with reference counting
     pub fn enable() -> Result<(), TrafficShapingError> {
-        let output = Command::new("pfctl")
-            .arg("-E")
-            .output()?;
+        let _ = Command::new("pfctl").arg("-e").output()?;
+        Ok(())
+    }
 
-        let output_str = String::from_utf8_lossy(&output.stdout);
-        if !output_str.contains("Token : ") {
+    /// Disables PF
+    pub fn disable() -> Result<(), TrafficShapingError> {
+        let output = Command::new("pfctl").arg("-d").output()?;
+
+        if !output.status.success() {
             return Err(TrafficShapingError::CommandError(
                 String::from_utf8_lossy(&output.stderr).to_string(),
             ));
@@ -57,46 +65,13 @@ impl PfctlCommands {
 
         Ok(())
     }
-
-    /// Disables PF (decrements reference count)
-    pub fn disable() -> Result<(), TrafficShapingError> {
-        // First check if other references exist
-        let status = Command::new("pfctl")
-            .arg("-s")
-            .arg("References")
-            .output()?;
-
-        let refs_output = String::from_utf8_lossy(&status.stdout);
-        let ref_count: i32 = refs_output
-            .lines()
-            .find(|line| line.contains("References"))
-            .and_then(|line| line.split(':').nth(1))
-            .and_then(|count| count.trim().parse().ok())
-            .unwrap_or(0);
-
-        // Only disable if this is the last reference
-        if ref_count <= 1 {
-            let output = Command::new("pfctl")
-                .arg("-d")
-                .output()?;
-
-            if !output.status.success() {
-                return Err(TrafficShapingError::CommandError(
-                    String::from_utf8_lossy(&output.stderr).to_string(),
-                ));
-            }
-        }
-
-        Ok(())
-    }
 }
 
+// dnctl - dummynet control
 impl DnctlCommands {
     /// Checks if a pipe exists
     pub fn pipe_exists(pipe_num: u32) -> Result<bool, TrafficShapingError> {
-        let output = Command::new("dnctl")
-            .arg("show")
-            .output()?;
+        let output = Command::new("dnctl").arg("show").output()?;
 
         if !output.status.success() {
             return Err(TrafficShapingError::CommandError(
@@ -143,10 +118,7 @@ impl DnctlCommands {
 
     /// Flushes all pipes
     pub fn flush_pipes() -> Result<(), TrafficShapingError> {
-        let output = Command::new("dnctl")
-            .arg("-f")
-            .arg("flush")
-            .output()?;
+        let output = Command::new("dnctl").arg("-q").arg("flush").output()?;
 
         if !output.status.success() {
             return Err(TrafficShapingError::CommandError(

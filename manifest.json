@@ -3,34 +3,35 @@
         "packet_loss": 0,
         "latency": 50,
         "bandwidth": 1000000,
-        "protocol": "udp",
-        "port_range": [8888, 8889]
+        "protocol": "Udp",
+        "src_ports": [7777, 7777],
+        "dst_ports": [7778, 7778]
     },
     "events": [
         {
-            "time": "1s"
+            "time": 1,
             "packet_loss": 5,
             "latency": 200,
-            "bandwidth": 1000000,
+            "bandwidth": 1000000
         },
         {
-            "time": "5s"
+            "time": 5,
             "packet_loss": 7,
             "latency": 200,
-            "bandwidth": 1000000,
+            "bandwidth": 1000000
         },
         {
-            "time": "7s"
+            "time": 7,
             "packet_loss": 5,
             "latency": 100,
-            "bandwidth": 1000000,
+            "bandwidth": 1000000
         },
         {
-            "time": "10s"
+            "time": 10,
             "packet_loss": 5,
             "latency": 200,
-            "bandwidth": 1000000,
-        },
-    ],
+            "bandwidth": 1000000
+        }
+    ]
 }
 

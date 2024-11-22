@@ -1,18 +1,14 @@
-use pin_project::pin_project;
-use std::error::Error;
 use std::future::Future;
 use std::pin::{pin, Pin};
 use std::task::{Context, Poll};
 use std::time::Instant;
-use thiserror::Error;
 
-use ts_core::{ApplyConfig, TrafficShaper};
+use pin_project::pin_project;
+use thiserror::Error;
+use tracing::{error, info};
+use ts_core::TrafficShaper;
 
 pub mod models;
-
-pub struct SimulationConfig {
-    manifest_path: String,
-}
 
 pub struct Simulation {
     manifest: models::Manifest,
@@ -37,25 +33,26 @@ impl Simulation {
         }
     }
     pub async fn start(&mut self) -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
+        info!("starting simulation");
         let res = self.start_inner().await;
+        info!("cleaning up");
         if let Err(e) = self.ts.cleanup() {
-            eprintln!("error during simulation cleanup: {}", e);
+            error!("error during simulation cleanup: {}", e);
         }
         res.map_err(|err| err.into())
     }
 
     async fn start_inner(&mut self) -> Result<(), SimulationError> {
-        if false {
-            self.ts
-                .enable()
-                .map_err(|err| SimulationError::SystemError(err.into()))?;
-        }
+        self.ts
+            .enable()
+            .map_err(|err| SimulationError::SystemError(err.into()))?;
 
         self.epoch = Instant::now();
 
         let mut d = Driver::new(&self.manifest.events, &self.ts, self.epoch.clone());
 
-        pin!(d).await
+        let res = pin!(d).await;
+        res
     }
 }
 
@@ -65,6 +62,8 @@ struct Driver<'a> {
     events: &'a Vec<models::Events>,
     epoch: Instant,
     traffic_shaper: &'a TrafficShaper,
+    #[pin]
+    sleep: tokio::time::Sleep,
 }
 
 impl<'a> Driver<'a> {
@@ -78,6 +77,7 @@ impl<'a> Driver<'a> {
             events,
             epoch,
             traffic_shaper,
+            sleep: tokio::time::sleep(std::time::Duration::ZERO),
         }
     }
 }
@@ -85,22 +85,23 @@ impl<'a> Driver<'a> {
 impl<'a> Future for Driver<'a> {
     type Output = Result<(), SimulationError>;
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.project();
+        let mut this = self.project();
         let now = Instant::now();
 
         let event = &this.events[*this.pos];
         let expiry = *this.epoch + event.time;
         if now >= expiry {
-            println!("handling event: {:?}", event);
+            info!(
+                "applying event: {:?} {}/{}",
+                event,
+                *this.pos + 1,
+                this.events.len()
+            );
 
-            if false {
-                this.traffic_shaper
-                    .apply(event.clone().into())
-                    .map_err(|err| SimulationError::SystemError(err.into()))?;
-            }
-            // It has expired
-            // signal to the Sim
-            // why is this mutation okay?
+            this.traffic_shaper
+                .apply(event.clone().into())
+                .map_err(|err| SimulationError::SystemError(err.into()))?;
+
             *this.pos += 1;
         }
 
@@ -110,9 +111,8 @@ impl<'a> Future for Driver<'a> {
             let deadline = tokio::time::Instant::from_std(
                 this.epoch.checked_add(this.events[*this.pos].time).unwrap(),
             );
-
-            let _ = pin!(tokio::time::sleep_until(deadline)).poll(cx);
-
+            this.sleep.as_mut().reset(deadline);
+            let _ = this.sleep.poll(cx);
             Poll::Pending
         }
     }

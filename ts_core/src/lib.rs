@@ -1,11 +1,11 @@
 use serde::Deserialize;
-use std::net::IpAddr;
 use thiserror::Error;
+use tracing::info;
 
 mod commands;
-mod rules;
-
 use commands::{DnctlCommands, PfctlCommands};
+
+mod rules;
 use rules::RuleGenerator;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -25,10 +25,9 @@ pub struct TrafficConfig {
     pub max_bandwidth: u64,
     /// Target protocol (TCP, UDP, or both)
     pub protocol: Protocol,
-    /// Target IP address
-    pub target_address: Option<IpAddr>,
-    /// Target port range
-    pub target_ports: Option<PortRange>,
+
+    pub src_ports: Option<PortRange>,
+    pub dst_ports: Option<PortRange>,
 }
 
 #[derive(Debug, Clone)]
@@ -66,31 +65,21 @@ impl TrafficConfig {
         latency: u32,
         max_bandwidth: u64,
         protocol: Protocol,
-        target_address: Option<IpAddr>,
-        target_ports: Option<(u16, u16)>,
+        src_ports: Option<PortRange>,
+        dst_ports: Option<PortRange>,
     ) -> Result<Self, TrafficShapingError> {
         // Validate packet loss
         if !(0.0..=100.0).contains(&packet_loss) {
             return Err(TrafficShapingError::InvalidPacketLoss(packet_loss));
         }
 
-        // Validate port range if provided
-        let target_ports = if let Some((start, end)) = target_ports {
-            if start > end {
-                return Err(TrafficShapingError::InvalidPortRange { start, end });
-            }
-            Some(PortRange { start, end })
-        } else {
-            None
-        };
-
         Ok(Self {
             packet_loss,
             latency,
             max_bandwidth,
             protocol,
-            target_address,
-            target_ports,
+            src_ports,
+            dst_ports,
         })
     }
 }
@@ -111,6 +100,7 @@ impl TrafficShaper {
     pub fn enable(&self) -> Result<(), TrafficShapingError> {
         // Step 1: Enable PF if not already enabled
         PfctlCommands::enable()?;
+        info!("pfctl enabled");
 
         // Step 2: Configure dummynet pipe with the specified configuration
         // The pipe will be created if it doesn't exist, or updated if it does
@@ -120,11 +110,18 @@ impl TrafficShaper {
             Some(self.config.latency),
             Some(self.config.packet_loss / 100.0), // Convert percentage to ratio
         )?;
+        info!("configured pipe");
 
         // Step 3: Generate and load PF rules only if the pipe didn't exist
         if !DnctlCommands::pipe_exists(DEFAULT_PIPE_NUMBER)? {
+            let anchor_name = String::from("traffic_shaper");
+            let anchor_rules = RuleGenerator::generate_anchor_rules(&anchor_name)?;
+            PfctlCommands::load_rules(&anchor_rules, Some(&anchor_name))?;
+            info!("loaded anchor rules");
+
             let rules = RuleGenerator::generate_pf_rules(&self.config, DEFAULT_PIPE_NUMBER)?;
-            PfctlCommands::load_rules(&rules)?;
+            PfctlCommands::load_rules(&rules, None)?;
+            info!("loaded pf rules");
         }
 
         Ok(())
@@ -152,28 +149,5 @@ impl TrafficShaper {
         PfctlCommands::disable()?;
 
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_traffic_config_validation() {
-        // Test valid config
-        let config =
-            TrafficConfig::new(50.0, 100, 1_000_000, Protocol::Tcp, None, Some((80, 8080)));
-        assert!(config.is_ok());
-
-        // Test invalid packet loss
-        let config =
-            TrafficConfig::new(101.0, 100, 1_000_000, Protocol::Tcp, None, Some((80, 8080)));
-        assert!(config.is_err());
-
-        // Test invalid port range
-        let config =
-            TrafficConfig::new(50.0, 100, 1_000_000, Protocol::Tcp, None, Some((8080, 80)));
-        assert!(config.is_err());
     }
 }

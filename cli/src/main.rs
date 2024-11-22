@@ -1,13 +1,12 @@
-use clap::{Parser, Subcommand};
-use log::{error, info};
-use serde_json::from_str;
 use std::fs;
-use std::net::IpAddr;
 use std::process;
 
+use clap::{Parser, Subcommand};
+use serde_json::from_str;
 use simulation::models::Manifest;
-use simulation::{Simulation, SimulationConfig, SimulationError};
-use ts_core::{Protocol, TrafficConfig, TrafficShaper};
+use simulation::Simulation;
+use tracing::{error, info};
+use ts_core::{PortRange, Protocol, TrafficConfig, TrafficShaper};
 
 #[derive(Parser)]
 #[command(name = "traffic-shaper")]
@@ -37,13 +36,13 @@ enum Commands {
         #[arg(long, value_parser = parse_protocol)]
         protocol: Protocol,
 
-        /// Optional target IP address
-        #[arg(long)]
-        target_address: Option<IpAddr>,
+        /// Optional target port range (format: start-end, e.g., 80-8080)
+        #[arg(long, value_parser = parse_port_range)]
+        src_ports: Option<(u16, u16)>,
 
         /// Optional target port range (format: start-end, e.g., 80-8080)
         #[arg(long, value_parser = parse_port_range)]
-        port_range: Option<(u16, u16)>,
+        dst_ports: Option<(u16, u16)>,
     },
     /// Stop traffic shaping and restore original configuration
     Stop,
@@ -92,10 +91,14 @@ fn check_root_access() -> bool {
     fs::metadata("/etc/pf.conf").is_ok()
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "multi_thread")]
 async fn main() {
-    // Initialize logging
-    env_logger::init();
+    tracing::subscriber::set_global_default(
+        tracing_subscriber::FmtSubscriber::builder()
+            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+            .finish(),
+    )
+    .unwrap();
 
     // Parse command line arguments
     let cli = Cli::parse();
@@ -112,8 +115,8 @@ async fn main() {
             latency,
             bandwidth,
             protocol,
-            target_address,
-            port_range,
+            src_ports,
+            dst_ports,
         } => {
             info!("Starting traffic shaping...");
 
@@ -123,8 +126,8 @@ async fn main() {
                 latency,
                 bandwidth,
                 protocol,
-                target_address,
-                port_range,
+                src_ports.map(|(start, end)| PortRange { start, end }),
+                dst_ports.map(|(start, end)| PortRange { start, end }),
             ) {
                 Ok(config) => config,
                 Err(e) => {

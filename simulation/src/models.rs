@@ -1,9 +1,8 @@
-use std::net::IpAddr;
 use std::time::Duration;
 
+use serde::Deserialize;
+use serde_with::{serde_as, DurationSeconds};
 use ts_core::{ApplyConfig, PortRange, Protocol, TrafficConfig};
-
-use serde::{de::Visitor, Deserialize};
 
 #[derive(Deserialize, Clone)]
 pub struct Manifest {
@@ -17,8 +16,8 @@ pub struct Config {
     pub latency: u32,
     pub bandwidth: u64,
     pub protocol: Protocol,
-    pub target_address: Option<IpAddr>,
-    pub port_range: Option<(u16, u16)>,
+    pub src_ports: Option<(u16, u16)>,
+    pub dst_ports: Option<(u16, u16)>,
 }
 
 impl Into<TrafficConfig> for Config {
@@ -28,14 +27,16 @@ impl Into<TrafficConfig> for Config {
             latency: self.latency,
             max_bandwidth: self.bandwidth,
             protocol: self.protocol,
-            target_address: self.target_address,
-            target_ports: self.port_range.map(|(start, end)| PortRange { start, end }),
+            src_ports: self.src_ports.map(|(start, end)| PortRange { start, end }),
+            dst_ports: self.dst_ports.map(|(start, end)| PortRange { start, end }),
         }
     }
 }
 
+#[serde_as]
 #[derive(Deserialize, Clone, Debug)]
 pub struct Events {
+    #[serde_as(as = "DurationSeconds<u64>")]
     pub time: Duration,
     pub latency: u32,
     pub bandwidth: u64,
