@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use serde::Deserialize;
 use serde_with::{serde_as, DurationSeconds};
-use ts_core::{ApplyConfig, PortRange, Protocol, TrafficConfig};
+use ts_core::{ApplyConfig, Output, PortRange, Protocol, TrafficConfig};
 
 #[derive(Deserialize, Clone)]
 pub struct Manifest {
@@ -18,6 +18,7 @@ pub struct Config {
     pub protocol: Protocol,
     pub src_ports: Option<(u16, u16)>,
     pub dst_ports: Option<(u16, u16)>,
+    pub report_output: Option<Output>,
 }
 
 impl Into<TrafficConfig> for Config {
@@ -29,6 +30,7 @@ impl Into<TrafficConfig> for Config {
             protocol: self.protocol,
             src_ports: self.src_ports.map(|(start, end)| PortRange { start, end }),
             dst_ports: self.dst_ports.map(|(start, end)| PortRange { start, end }),
+            report_output: self.report_output.map_or(Output::None, |v| v),
         }
     }
 }

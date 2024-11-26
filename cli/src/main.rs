@@ -6,7 +6,7 @@ use serde_json::from_str;
 use simulation::models::Manifest;
 use simulation::Simulation;
 use tracing::{error, info};
-use ts_core::{PortRange, Protocol, TrafficConfig, TrafficShaper};
+use ts_core::{Output, PortRange, Protocol, TrafficConfig, TrafficShaper};
 
 #[derive(Parser)]
 #[command(name = "traffic-shaper")]
@@ -43,6 +43,9 @@ enum Commands {
         /// Optional target port range (format: start-end, e.g., 80-8080)
         #[arg(long, value_parser = parse_port_range)]
         dst_ports: Option<(u16, u16)>,
+
+        #[arg(long, value_parser = parse_output)]
+        report_output: Option<Output>,
     },
     /// Stop traffic shaping and restore original configuration
     Stop,
@@ -86,6 +89,19 @@ fn parse_port_range(s: &str) -> Result<(u16, u16), String> {
     Ok((start, end))
 }
 
+fn parse_output(s: &str) -> Result<Output, String> {
+    let parts: Vec<&str> = s.split("=").collect();
+    if parts.len() == 2 {
+        Ok(Output::File {
+            path: parts[1].to_string(),
+        })
+    } else if s.contains("stdout") {
+        Ok(Output::Stdout)
+    } else {
+        Err("expected to get 'stdout' or 'path=${path}'".to_string())
+    }
+}
+
 fn check_root_access() -> bool {
     // Try to access a root-only file
     fs::metadata("/etc/pf.conf").is_ok()
@@ -117,6 +133,7 @@ async fn main() {
             protocol,
             src_ports,
             dst_ports,
+            report_output,
         } => {
             info!("Starting traffic shaping...");
 
@@ -128,6 +145,7 @@ async fn main() {
                 protocol,
                 src_ports.map(|(start, end)| PortRange { start, end }),
                 dst_ports.map(|(start, end)| PortRange { start, end }),
+                report_output.map_or(Output::None, |e| e),
             ) {
                 Ok(config) => config,
                 Err(e) => {
@@ -137,7 +155,7 @@ async fn main() {
             };
 
             // Apply traffic shaping
-            let shaper = TrafficShaper::new(config);
+            let mut shaper = TrafficShaper::new(config);
             if let Err(e) = shaper.enable() {
                 error!("Failed to apply traffic shaping: {}", e);
                 process::exit(1);
@@ -149,13 +167,14 @@ async fn main() {
             info!("Stopping traffic shaping...");
 
             // Create a dummy config just to use the cleanup functionality
-            let config = match TrafficConfig::new(0.0, 0, 0, Protocol::Both, None, None) {
-                Ok(config) => config,
-                Err(e) => {
-                    error!("Failed to create configuration: {}", e);
-                    process::exit(1);
-                }
-            };
+            let config =
+                match TrafficConfig::new(0.0, 0, 0, Protocol::Both, None, None, Output::None) {
+                    Ok(config) => config,
+                    Err(e) => {
+                        error!("Failed to create configuration: {}", e);
+                        process::exit(1);
+                    }
+                };
 
             let shaper = TrafficShaper::new(config);
             if let Err(e) = shaper.cleanup() {
@@ -169,7 +188,8 @@ async fn main() {
             use std::fs;
             use std::time::Instant;
             let contents = fs::read_to_string(manifest_path).expect("failed to open manifest path");
-            let manifest: Manifest = from_str(contents.as_str()).unwrap();
+            let manifest: Manifest =
+                from_str(contents.as_str()).expect("failed to convert contents to manifest");
             let mut simulation = Simulation::new(manifest, Instant::now());
 
             let join = tokio::spawn(async move { simulation.start().await });

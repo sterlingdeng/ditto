@@ -49,7 +49,7 @@ impl Simulation {
 
         self.epoch = Instant::now();
 
-        let mut d = Driver::new(&self.manifest.events, &self.ts, self.epoch.clone());
+        let mut d = Driver::new(&self.manifest.events, &mut self.ts, self.epoch.clone());
 
         let res = pin!(d).await;
         res
@@ -61,7 +61,7 @@ struct Driver<'a> {
     pos: usize,
     events: &'a Vec<models::Events>,
     epoch: Instant,
-    traffic_shaper: &'a TrafficShaper,
+    traffic_shaper: &'a mut TrafficShaper,
     #[pin]
     sleep: tokio::time::Sleep,
 }
@@ -69,7 +69,7 @@ struct Driver<'a> {
 impl<'a> Driver<'a> {
     fn new(
         events: &'a Vec<models::Events>,
-        traffic_shaper: &'a TrafficShaper,
+        traffic_shaper: &'a mut TrafficShaper,
         epoch: Instant,
     ) -> Self {
         Self {
